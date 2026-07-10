@@ -22,3 +22,5 @@ Thumbs.db
 
 # IDE
 .vscode/settings.json
+# Model artifacts (regenerable by rerunning training scripts)
+models/
