@@ -143,9 +143,9 @@ pytest tests\ -v
 - [ ] Transformer for time series
 - [ ] News sentiment (FinBERT)
 - [ ] Ensemble model
-- [ ] SHAP explainability
+- [x] SHAP explainability
 - [ ] Risk analysis & portfolio optimization
-- [ ] FastAPI backend + React dashboard
+- [x] FastAPI backend (predict, health, price history endpoints)
 
 | Model | Accuracy | ROC-AUC |
 |---|---|---|
@@ -167,3 +167,73 @@ pathway captured longer-term dependencies in this feature set that
 GRU's simpler gating mechanism did not. This shows architecture
 *type*, not just parameter count, matters when data is limited.
 
+## Explainability (SHAP)
+
+Using SHAP TreeExplainer on the Random Forest model, the top predictive
+features were volatility and volume-based, not classic momentum
+oscillators:
+
+| Rank | Feature | Mean \|SHAP value\| |
+|---|---|---|
+| 1 | atr_14 (Average True Range) | 0.0247 |
+| 2 | rolling_vol_mean_20 | 0.0183 |
+| 3 | obv (On-Balance Volume) | 0.0173 |
+| 4 | momentum_10 | 0.0114 |
+| 5 | bb_upper (Bollinger Band) | 0.0108 |
+
+This suggests the model relies more on *how turbulently* a stock is
+trading than on classic overbought/oversold signals like RSI - a
+genuinely interesting, model-derived finding rather than an assumption
+built into the feature set.
+
+Each individual prediction can also be explained locally - e.g. a
+DOWN prediction on 2022-01-14 was driven primarily by negative
+momentum, declining OBV, and elevated ATR, all consistent with the
+actual outcome.
+
+## Live API
+
+A FastAPI backend serves live predictions from the trained Random
+Forest model, with SHAP-based explanations included in every response.
+
+### Endpoints
+
+- `GET /health` — service health check
+- `POST /predict` — returns a direction prediction, probability, signal
+  (BUY/HOLD/SELL), and top 5 SHAP feature contributors for the latest
+  available data
+- `GET /stocks/{ticker}/history?days=N` — recent price/volume history
+
+### Run it
+
+\`\`\`powershell
+uvicorn backend.app.main:app --reload
+\`\`\`
+
+Then open `http://127.0.0.1:8000/docs` for interactive API documentation.
+
+### Example response (`POST /predict`, `{"ticker": "AAPL"}`)
+
+\`\`\`json
+{
+  "ticker": "AAPL",
+  "prediction_date": "2024-12-23",
+  "probability_up": 0.4697,
+  "signal": "HOLD",
+  "top_contributors": [
+    {"feature": "obv", "shap_value": -0.0391, "direction": "pushes toward DOWN"},
+    {"feature": "atr_14", "shap_value": -0.0258, "direction": "pushes toward DOWN"},
+    {"feature": "rolling_vol_mean_20", "shap_value": 0.0248, "direction": "pushes toward UP"}
+  ]
+}
+\`\`\`
+
+### Design note: why Random Forest, not LSTM, is deployed
+
+LSTM scored marginally higher in validation (60.9% vs 59.1% accuracy),
+but Random Forest was chosen for the live API because it requires only
+the latest row of features (not a 15-day scaled sequence), pairs with
+exact and fast SHAP explanations via `TreeExplainer`, and avoids the
+added complexity of persisting a fitted scaler and managing PyTorch
+inference mode. This was a deliberate simplicity-vs-marginal-accuracy
+tradeoff, not an oversight.
