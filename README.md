@@ -132,14 +132,38 @@ pytest tests\ -v
 
 ## Roadmap
 
+## Roadmap
+
 - [x] Data collection, validation, cleaning
 - [x] EDA
 - [x] Feature engineering (35 technical indicators)
 - [x] Target engineering (return, direction, 3-class)
 - [x] Baseline models (Naive, LR, RF, XGBoost) + backtest
-- [ ] LSTM / GRU sequence models
+- [x] LSTM / GRU sequence models
+- [ ] Transformer for time series
 - [ ] News sentiment (FinBERT)
 - [ ] Ensemble model
 - [ ] SHAP explainability
 - [ ] Risk analysis & portfolio optimization
 - [ ] FastAPI backend + React dashboard
+
+| Model | Accuracy | ROC-AUC |
+|---|---|---|
+| Naive baseline | 53.7% | — |
+| Logistic Regression | 53.9% | 0.588 |
+| Random Forest | 59.1% | 0.631 |
+| XGBoost | 55.8% | 0.524 |
+| **LSTM (tuned)** | **60.9%** | **0.646** |
+| GRU (tuned) | 49.3% | 0.524 |
+
+## LSTM vs GRU: an architecture comparison
+
+Both sequence models were tuned with matched, right-sized architectures
+(16 hidden units, 1 layer, 15-day sequences, 0.4 dropout) after an
+initial larger LSTM (64 units, 2 layers) badly overfit our ~1,700
+training sequences. With capacity matched, LSTM clearly outperformed
+GRU (60.9% vs 49.3% accuracy) - suggesting LSTM's explicit cell-state
+pathway captured longer-term dependencies in this feature set that
+GRU's simpler gating mechanism did not. This shows architecture
+*type*, not just parameter count, matters when data is limited.
+
