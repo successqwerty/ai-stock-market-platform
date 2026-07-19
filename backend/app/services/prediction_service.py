@@ -1,11 +1,9 @@
 """
-Prediction service: loads the trained Random Forest model, builds
-features for the latest available data, and returns a prediction
-with a SHAP-based explanation.
-
-Kept separate from the API route (backend/app/api/predictions.py) so
-the actual logic is testable independent of FastAPI/HTTP concerns -
-a standard layered-architecture practice.
+Prediction service: loads a trained Random Forest model per ticker,
+using the LABELED dataset for training (which needs a target) and the
+LIVE FEATURES dataset for inference (which doesn't need a target, so
+it includes every row up to the most recent trading day - unlike the
+labeled dataset, which drops the last `horizon` rows).
 """
 
 import sys
@@ -25,21 +23,25 @@ from src.ml.splitting import time_aware_split  # noqa: E402
 
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
-# NOTE: for now we retrain the model on startup rather than loading a
-# saved artifact - this keeps things simple while we only support one
-# ticker (AAPL). A future improvement would persist the trained model
-# (e.g. via joblib) so the API doesn't retrain on every restart.
-_model = None
-_feature_cols = None
-_full_df = None
+SUPPORTED_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+
+# Cache: one trained model + feature list per ticker, so we don't
+# retrain on every request - only on first request per ticker.
+_model_cache: dict = {}
 
 
-def _get_model_and_data():
-    """Lazily train the model once, cache it for subsequent requests."""
-    global _model, _feature_cols, _full_df
+def _get_model_and_features(ticker: str):
+    """Lazily train and cache a model for this ticker."""
+    ticker = ticker.upper()
 
-    if _model is None:
-        df = pd.read_csv(PROCESSED_DIR / "AAPL_labeled.csv", parse_dates=["Date"])
+    if ticker not in SUPPORTED_TICKERS:
+        raise ValueError(
+            f"Ticker '{ticker}' is not supported. Supported tickers: {SUPPORTED_TICKERS}"
+        )
+
+    if ticker not in _model_cache:
+        labeled_path = PROCESSED_DIR / f"{ticker}_labeled.csv"
+        df = pd.read_csv(labeled_path, parse_dates=["Date"])
         feature_cols = get_feature_columns(df)
         df = df.dropna(subset=feature_cols + ["target_direction_5d"]).reset_index(drop=True)
 
@@ -47,26 +49,34 @@ def _get_model_and_data():
         X_train = train_df[feature_cols]
         y_train = train_df["target_direction_5d"]
 
-        _model = train_random_forest(X_train, y_train)
-        _feature_cols = feature_cols
-        _full_df = df
+        model = train_random_forest(X_train, y_train)
+        _model_cache[ticker] = (model, feature_cols)
 
-    return _model, _feature_cols, _full_df
+    return _model_cache[ticker]
+
+
+def _get_live_features(ticker: str) -> pd.DataFrame:
+    """Load the freshest available feature row(s) - no target needed,
+    so this includes data up to the most recent trading day, unlike
+    the labeled training dataset."""
+    live_path = PROCESSED_DIR / f"{ticker.upper()}_live_features.csv"
+    if not live_path.exists():
+        raise FileNotFoundError(
+            f"No live features file found for {ticker}. Run scripts/build_live_features.py first."
+        )
+    return pd.read_csv(live_path, parse_dates=["Date"])
 
 
 def predict_latest(ticker: str = "AAPL") -> dict:
     """
-    Generate a prediction for the most recent available row of data.
-
-    NOTE: currently only AAPL is supported, since that's the only
-    ticker we've built a full feature/target pipeline for.
+    Generate a prediction for the most recent available trading day,
+    using a model trained on historical labeled data but applied to
+    the freshest available feature row.
     """
-    if ticker.upper() != "AAPL":
-        raise ValueError(f"Ticker '{ticker}' is not supported yet. Only AAPL is available.")
+    model, feature_cols = _get_model_and_features(ticker)
+    live_df = _get_live_features(ticker)
 
-    model, feature_cols, df = _get_model_and_data()
-
-    latest_row = df.iloc[[-1]]
+    latest_row = live_df.iloc[[-1]]
     X_latest = latest_row[feature_cols]
 
     probability_up = float(model.predict_proba(X_latest)[0, 1])
@@ -85,11 +95,15 @@ def predict_latest(ticker: str = "AAPL") -> dict:
 
 
 def get_price_history(ticker: str = "AAPL", days: int = 30) -> dict:
-    """Return the most recent `days` of close price and volume."""
-    if ticker.upper() != "AAPL":
-        raise ValueError(f"Ticker '{ticker}' is not supported yet. Only AAPL is available.")
+    """Return the most recent `days` of close price and volume, from
+    the live features file (freshest available data)."""
+    ticker = ticker.upper()
+    if ticker not in SUPPORTED_TICKERS:
+        raise ValueError(
+            f"Ticker '{ticker}' is not supported. Supported tickers: {SUPPORTED_TICKERS}"
+        )
 
-    _, _, df = _get_model_and_data()
+    df = _get_live_features(ticker)
     recent = df.tail(days)
 
     history = [
@@ -101,4 +115,4 @@ def get_price_history(ticker: str = "AAPL", days: int = 30) -> dict:
         for _, row in recent.iterrows()
     ]
 
-    return {"ticker": ticker.upper(), "history": history} 
+    return {"ticker": ticker, "history": history}  
