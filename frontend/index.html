@@ -357,14 +357,47 @@
     </svg>
     <span>Educational and research purposes only. Not financial advice. Model outputs are probabilistic estimates, not guarantees.</span>
   </div>
-
-  <div class="cta-row">
-    <button id="predictBtn" onclick="runPrediction()">
-      <span id="btnLabel">▶ RUN LIVE PREDICTION — AAPL</span>
-    </button>
-    <span class="status-line" id="statusLine"></span>
+  <div style="display:flex; gap:10px; margin-bottom:20px;">
+  <button id="modeSingleBtn" onclick="setMode('single')" style="background:#1A1F2B; color:#FFB454; border:1px solid #FFB454; font-family:'JetBrains Mono',monospace; font-size:12.5px; padding:8px 18px; border-radius:6px; cursor:pointer;">SINGLE STOCK</button>
+  <button id="modeCompareBtn" onclick="setMode('compare')" style="background:#1A1F2B; color:#7C8598; border:1px solid #232838; font-family:'JetBrains Mono',monospace; font-size:12.5px; padding:8px 18px; border-radius:6px; cursor:pointer;">COMPARE TWO</button>
   </div>
 
+  <div class="cta-row" id="singleControls">
+  <select id="tickerSelect" style="background:#1A1F2B; color:#E6E9EF; border:1px solid #232838; border-radius:8px; padding:14px 18px; font-family:'JetBrains Mono',monospace; font-size:14px; cursor:pointer;">
+    <option value="AAPL">AAPL — Apple</option>
+    <option value="MSFT">MSFT — Microsoft</option>
+    <option value="GOOGL">GOOGL — Alphabet</option>
+    <option value="AMZN">AMZN — Amazon</option>
+    <option value="TSLA">TSLA — Tesla</option>
+  </select>
+  <button id="predictBtn" onclick="runPrediction()">
+    <span id="btnLabel">▶ RUN LIVE PREDICTION</span>
+  </button>
+  <span class="status-line" id="statusLine"></span>
+</div>
+
+<div class="cta-row" id="compareControls" style="display:none;">
+  <select id="tickerSelectA" style="background:#1A1F2B; color:#E6E9EF; border:1px solid #232838; border-radius:8px; padding:14px 18px; font-family:'JetBrains Mono',monospace; font-size:14px; cursor:pointer;">
+    <option value="AAPL">AAPL — Apple</option>
+    <option value="MSFT">MSFT — Microsoft</option>
+    <option value="GOOGL">GOOGL — Alphabet</option>
+    <option value="AMZN">AMZN — Amazon</option>
+    <option value="TSLA">TSLA — Tesla</option>
+  </select>
+  <span style="color:#7C8598; font-family:'JetBrains Mono',monospace;">VS</span>
+  <select id="tickerSelectB" style="background:#1A1F2B; color:#E6E9EF; border:1px solid #232838; border-radius:8px; padding:14px 18px; font-family:'JetBrains Mono',monospace; font-size:14px; cursor:pointer;">
+    <option value="AAPL">AAPL — Apple</option>
+    <option value="MSFT">MSFT — Microsoft</option>
+    <option value="GOOGL">GOOGL — Alphabet</option>
+    <option value="AMZN">AMZN — Amazon</option>
+    <option value="TSLA" selected>TSLA — Tesla</option>
+  </select>
+  <button id="compareBtn" onclick="runComparison()">
+    <span id="compareBtnLabel">▶ COMPARE</span>
+  </button>
+  <span class="status-line" id="compareStatusLine"></span>
+</div>
+<div id="singleResults">
   <div class="card" id="resultCard">
     <div class="card-label">// Prediction Output</div>
     <div class="result-grid">
@@ -388,7 +421,17 @@
     <div class="card-label">// Recent Price History — 30 Sessions</div>
     <canvas id="priceChart"></canvas>
   </div>
-
+</div>
+<div id="compareResults" style="display:none;">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+    <div class="card" id="compareCardA"></div>
+    <div class="card" id="compareCardB"></div>
+  </div>
+  <div class="card" id="compareChartCard">
+    <div class="card-label">// Price History Overlay — 30 Sessions (% Change Comparison)</div>
+    <canvas id="compareChartCombined"></canvas>
+  </div>
+</div>
   <footer>
     <div>
       <div class="stack-row">
@@ -407,6 +450,9 @@
 <script>
 const API_BASE = "http://127.0.0.1:8000";
 let chartInstance = null;
+let compareChartInstanceA = null;
+let compareChartInstanceB = null;
+let compareChartCombinedInstance = null;
 
 function renderTicker(items) {
   const track = document.getElementById("tickerTrack");
@@ -441,7 +487,258 @@ function animateNumber(el, target, decimals, suffix) {
   }
   requestAnimationFrame(step);
 }
+function setMode(mode) {
+  const singleBtn = document.getElementById("modeSingleBtn");
+  const compareBtn = document.getElementById("modeCompareBtn");
+  const singleControls = document.getElementById("singleControls");
+  const compareControls = document.getElementById("compareControls");
+  const singleResults = document.getElementById("singleResults");
+  const compareResults = document.getElementById("compareResults");
 
+  if (mode === "single") {
+    singleControls.style.display = "flex";
+    compareControls.style.display = "none";
+    singleResults.style.display = "block";
+    compareResults.style.display = "none";
+    singleBtn.style.color = "#FFB454";
+    singleBtn.style.borderColor = "#FFB454";
+    compareBtn.style.color = "#7C8598";
+    compareBtn.style.borderColor = "#232838";
+  } else {
+    singleControls.style.display = "none";
+    compareControls.style.display = "flex";
+    singleResults.style.display = "none";
+    compareResults.style.display = "block";
+    compareBtn.style.color = "#FFB454";
+    compareBtn.style.borderColor = "#FFB454";
+    singleBtn.style.color = "#7C8598";
+    singleBtn.style.borderColor = "#232838";
+  }
+}
+
+function renderCompareCard(container, prediction, history, canvasId, color) {
+  const isUp = (c) => c.direction.includes("UP");
+  const maxAbs = Math.max(...prediction.top_contributors.map(c => Math.abs(c.shap_value)));
+
+  const contributorsHtml = prediction.top_contributors.map(c => {
+    const up = isUp(c);
+    const pct = (Math.abs(c.shap_value) / maxAbs) * 50;
+    return `
+      <div class="contributor-row">
+        <span class="contributor-name">${c.feature}</span>
+        <div class="bar-track">
+          <div class="bar-fill ${up ? 'up' : 'down'}" style="width:${pct}%"></div>
+        </div>
+        <span class="contributor-value ${up ? 'up' : 'down'}">${c.shap_value.toFixed(4)}</span>
+      </div>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="card-label">// ${prediction.ticker}</div>
+    <div class="prob-number" style="color:${color};">${(prediction.probability_up * 100).toFixed(1)}%</div>
+    <div class="prob-caption">Probability of upward move · 5-day horizon</div>
+    <div class="meta-line">As of <b>${prediction.prediction_date}</b></div>
+    <div style="margin:16px 0;">
+      <span class="signal-badge signal-${prediction.signal}">${prediction.signal}</span>
+    </div>
+    <div style="margin-top:16px; padding-top:14px; border-top:1px solid #232838;">
+      <div class="card-label" style="margin-bottom:8px;">// Top Drivers (SHAP)</div>
+      ${contributorsHtml}
+    </div>
+    <div style="margin-top:16px; padding-top:14px; border-top:1px solid #232838;">
+      <div class="card-label" style="margin-bottom:8px;">// 30-Session Price Action ($)</div>
+      <canvas id="${canvasId}" style="max-height:160px;"></canvas>
+    </div>
+  `;
+  container.classList.add("revealed");
+}
+
+function renderMiniChart(canvasId, ticker, history, color) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const labels = history.map(h => h.date);
+  const prices = history.map(h => h.close);
+
+  if (canvasId === "compareChartA" && compareChartInstanceA) compareChartInstanceA.destroy();
+  if (canvasId === "compareChartB" && compareChartInstanceB) compareChartInstanceB.destroy();
+
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: `${ticker} Close`,
+        data: prices,
+        borderColor: color,
+        backgroundColor: color.replace("1)", "0.08)"),
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: color,
+        fill: true,
+        tension: 0.3,
+      }],
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 600 },
+      interaction: { intersect: false, mode: "index" },
+      scales: {
+        x: {
+          grid: { color: "#1A1F2B" },
+          ticks: { color: "#7C8598", font: { family: "JetBrains Mono", size: 9 }, maxTicksLimit: 5 },
+        },
+        y: {
+          grid: { color: "#1A1F2B" },
+          ticks: { color: "#7C8598", font: { family: "JetBrains Mono", size: 9 } },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#12161F",
+          borderColor: "#232838",
+          borderWidth: 1,
+          titleFont: { family: "JetBrains Mono" },
+          bodyFont: { family: "JetBrains Mono" },
+        },
+      },
+    },
+  });
+
+  if (canvasId === "compareChartA") compareChartInstanceA = chart;
+  if (canvasId === "compareChartB") compareChartInstanceB = chart;
+}
+
+function renderCombinedChart(tickerA, historyA, tickerB, historyB) {
+  const ctx = document.getElementById("compareChartCombined");
+  if (!ctx) return;
+  if (compareChartCombinedInstance) compareChartCombinedInstance.destroy();
+
+  const labels = historyA.map(h => h.date);
+  const baseA = historyA[0].close;
+  const baseB = historyB[0].close;
+
+  const pctA = historyA.map(h => ((h.close - baseA) / baseA) * 100);
+  const pctB = historyB.map(h => ((h.close - baseB) / baseB) * 100);
+
+  compareChartCombinedInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: `${tickerA} % Change`,
+          data: pctA,
+          borderColor: "#FFB454",
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.3,
+        },
+        {
+          label: `${tickerB} % Change`,
+          data: pctB,
+          borderColor: "#3DD68C",
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 900, easing: "easeOutCubic" },
+      interaction: { intersect: false, mode: "index" },
+      scales: {
+        x: {
+          grid: { color: "#1A1F2B" },
+          ticks: { color: "#7C8598", font: { family: "JetBrains Mono", size: 10 }, maxTicksLimit: 8 },
+        },
+        y: {
+          grid: { color: "#1A1F2B" },
+          ticks: {
+            color: "#7C8598",
+            font: { family: "JetBrains Mono", size: 10 },
+            callback: (val) => (val > 0 ? "+" : "") + val.toFixed(1) + "%",
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: "#E6E9EF", font: { family: "JetBrains Mono", size: 11 } },
+        },
+        tooltip: {
+          backgroundColor: "#12161F",
+          borderColor: "#232838",
+          borderWidth: 1,
+          titleFont: { family: "JetBrains Mono" },
+          bodyFont: { family: "JetBrains Mono" },
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y > 0 ? "+" : ""}${ctx.parsed.y.toFixed(2)}%`,
+          },
+        },
+      },
+    },
+  });
+}
+
+async function runComparison() {
+  const btn = document.getElementById("compareBtn");
+  const label = document.getElementById("compareBtnLabel");
+  const status = document.getElementById("compareStatusLine");
+
+  const tickerA = document.getElementById("tickerSelectA").value;
+  const tickerB = document.getElementById("tickerSelectB").value;
+
+  if (tickerA === tickerB) {
+    status.textContent = "⚠ Please select two different stocks.";
+    return;
+  }
+
+  btn.disabled = true;
+  label.innerHTML = 'COMPARING<span class="cursor-blink">_</span>';
+  status.textContent = "";
+
+  try {
+    const [respA, respB, histRespA, histRespB] = await Promise.all([
+      fetch(`${API_BASE}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: tickerA }),
+      }),
+      fetch(`${API_BASE}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: tickerB }),
+      }),
+      fetch(`${API_BASE}/stocks/${tickerA}/history?days=30`),
+      fetch(`${API_BASE}/stocks/${tickerB}/history?days=30`),
+    ]);
+
+    const predictionA = await respA.json();
+    const predictionB = await respB.json();
+    const historyA = (await histRespA.json()).history;
+    const historyB = (await histRespB.json()).history;
+
+    renderCompareCard(document.getElementById("compareCardA"), predictionA, historyA, "compareChartA", "rgba(255, 180, 84, 1)");
+    renderCompareCard(document.getElementById("compareCardB"), predictionB, historyB, "compareChartB", "rgba(61, 214, 140, 1)");
+
+    renderMiniChart("compareChartA", tickerA, historyA, "rgba(255, 180, 84, 1)");
+    renderMiniChart("compareChartB", tickerB, historyB, "rgba(61, 214, 140, 1)");
+
+    renderCombinedChart(tickerA, historyA, tickerB, historyB);
+    revealCard(document.getElementById("compareChartCard"));
+
+  } catch (err) {
+    status.textContent = `⚠ Could not reach API at ${API_BASE}. Is the backend running?`;
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    label.textContent = "▶ COMPARE";
+  }
+}
 async function runPrediction() {
   const btn = document.getElementById("predictBtn");
   const btnLabel = document.getElementById("btnLabel");
@@ -452,10 +749,12 @@ async function runPrediction() {
   status.textContent = "";
 
   try {
+    const selectedTicker = document.getElementById("tickerSelect").value;
+
     const predictResp = await fetch(`${API_BASE}/predict`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: "AAPL" }),
+      body: JSON.stringify({ ticker: selectedTicker }),
     });
     if (!predictResp.ok) throw new Error(`API responded with ${predictResp.status}`);
     const prediction = await predictResp.json();
@@ -508,7 +807,7 @@ async function runPrediction() {
       { label: "BACKTEST SHARPE", value: "1.04", cls: "" },
     ]);
 
-    const historyResp = await fetch(`${API_BASE}/stocks/AAPL/history?days=30`);
+    const historyResp = await fetch(`${API_BASE}/stocks/${selectedTicker}/history?days=30`);
     const historyData = await historyResp.json();
     renderChart(historyData.history);
     revealCard(document.getElementById("chartCard"));
@@ -519,7 +818,7 @@ async function runPrediction() {
     console.error(err);
   } finally {
     btn.disabled = false;
-    btnLabel.textContent = "▶ RUN LIVE PREDICTION — AAPL";
+    btnLabel.textContent = "▶ RUN LIVE PREDICTION";
   }
 }
 
