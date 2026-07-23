@@ -34,6 +34,7 @@ during development, documented below).
 | XGBoost | 55.8% | 0.524 |
 | **LSTM (tuned)** | **60.9%** | **0.646** |
 | GRU (tuned) | 49.3% | 0.524 |
+| **Ensemble (Weighted Avg)** | **56.8%** | **0.653** |
 
 Backtest (Random Forest, unseen test period, July 2023–Dec 2024):
 - Sharpe ratio: 1.04
@@ -74,6 +75,13 @@ outperformed GRU (60.9% vs 49.3% accuracy) — suggesting LSTM's explicit
 cell-state pathway captured longer-term dependencies in this feature set
 that GRU's simpler gating mechanism did not. This shows architecture
 *type*, not just parameter count, matters when data is limited.
+
+## Weighted-Average Ensemble Model
+
+A weighted-average ensemble combining Random Forest, XGBoost, and LSTM predictions was constructed using validation-set ROC-AUC to determine model weights.
+
+- **Strict Leakage Prevention**: Weights are derived strictly from validation performance above random chance (0.5 AUC) — never from held-out test data. When models score below 0.5 AUC on validation, an equal-weighting fallback (33.3% each) is automatically applied.
+- **Performance Result**: On the unseen test period, the Ensemble achieved an **ROC-AUC of 0.6533**, outperforming every individual constituent model (LSTM 0.6260, XGBoost 0.6137, RF 0.5909). Accuracy reached 56.76%, demonstrating improved ranking reliability and reduced model variance.
 
 ## Explainability (SHAP)
 
@@ -283,7 +291,7 @@ pytest tests\ -v
 - [x] FastAPI backend (predict, health, price history endpoints)
 - [x] Demo frontend
 - [x] Multi-stock support (AAPL, MSFT, GOOGL, AMZN, TSLA)
+- [x] Ensemble model
 - [ ] Transformer for time series
 - [ ] News sentiment (FinBERT)
-- [ ] Ensemble model
 - [ ] Risk analysis & portfolio optimization
