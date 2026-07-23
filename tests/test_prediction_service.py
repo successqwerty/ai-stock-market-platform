@@ -34,7 +34,7 @@ def test_predict_latest_signal_matches_probability():
 
 def test_predict_latest_rejects_unsupported_ticker():
     with pytest.raises(ValueError):
-        predict_latest("MSFT")
+        predict_latest("INVALID")
 
 
 def test_get_price_history_returns_requested_days():
@@ -45,4 +45,4 @@ def test_get_price_history_returns_requested_days():
 
 def test_get_price_history_rejects_unsupported_ticker():
     with pytest.raises(ValueError):
-        get_price_history("TSLA") 
+        get_price_history("INVALID") 
